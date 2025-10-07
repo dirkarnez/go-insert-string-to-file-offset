@@ -1,182 +1,84 @@
 package main
 
 import (
-	"bufio"
-	"context"
-	"flag"
 	"fmt"
-	"io/fs"
+	"io/ioutil"
 	"log"
 	"os"
-	"path/filepath"
-	"strings"
-
-	"github.com/chromedp/cdproto/network"
-	"github.com/chromedp/cdproto/runtime"
-	"github.com/chromedp/chromedp"
-	"github.com/graniticio/inifile"
 )
 
-var (
-	dir string
-)
+func ls() {
+	dirPath, _ := os.Getwd()
 
-func main() {
-	flag.StringVar(&dir, "dir", "", "Absolute path for target directory")
-
-	flag.Parse()
-	if len(dir) < 1 {
-		log.Fatal("No --dir is given")
+	entries, err := os.ReadDir(dirPath)
+	if err != nil {
+		log.Fatalf("Error reading directory: %v", err)
 	}
 
-	urlFiles := Scan(dir, ".url")
-	urlFilesLen := len(urlFiles)
-	if urlFilesLen < 1 {
-		log.Fatal("No .url file found")
+	fmt.Printf("Contents of directory '%s':\n", dirPath)
+	for _, entry := range entries {
+		fmt.Println(entry.Name())
 	}
-	fmt.Printf("There are %d url files\n", len(urlFiles))
-
-	file, err := os.Create(fmt.Sprintf("%s.txt", getFolderName(dir)))
-	errExit(err)
-	defer file.Close()
-	w := bufio.NewWriter(file)
-
-	for _, s := range urlFiles {
-		ic, err := inifile.NewIniConfigFromPath(s)
-		errExit(err)
-		url, err := ic.Value("InternetShortcut", "URL")
-		errExit(err)
-		fmt.Println("checking", url, ", in", s, "...")
-		protocol := url[0:strings.Index(url, `://`)]
-		if protocol == `http` || protocol == `https` {
-			title, err := getTitle(url)
-			errExit(err)
-			fmt.Fprintf(w, "- [%s](%s)\n", title, url)
-		} else {
-			fmt.Fprintf(w, "- [%s](%s)\n", url, url)
-		}
-	}
-	errExit(w.Flush())
-
-	// for _, s := range urlFiles {
-	// 	errExit(os.Remove(s))
-	// }
 }
 
-func errExit(err error) {
+func writeAFile() {
+	content := "Hello, Go!\nThis is a new line."
+	err := os.WriteFile("output.txt", []byte(content), 0644) // 0644 are file permissions
 	if err != nil {
 		log.Fatal(err)
 	}
+	log.Println("String successfully written to output.txt")
 }
 
-func Scan(root, ext string) []string {
-	var a []string
-	filepath.WalkDir(root, func(s string, d fs.DirEntry, e error) error {
-		if e != nil {
-			return e
-		}
-		if filepath.Ext(d.Name()) == ext {
-			a = append(a, s)
-		}
-		return nil
-	})
-	return a
+func readTheFile() {
+	// Read the file content into a byte slice
+	contentBytes, err := os.ReadFile("output.txt")
+	if err != nil {
+		fmt.Printf("Error reading file: %v\n", err)
+		return
+	}
+
+	// Convert the byte slice to a string
+	contentString := string(contentBytes)
+
+	fmt.Println("File content as string:")
+	fmt.Println(contentString)
 }
 
-func getTitle(urlstr string) (string, error) {
-	ctx, cancel := chromedp.NewContext(context.Background())
-	defer cancel()
-	var title string
-
-	chromedp.ListenTarget(ctx, func(ev interface{}) {
-
-		switch ev := ev.(type) {
-
-		case *network.EventResponseReceived:
-			resp := ev.Response
-			if resp.URL == urlstr {
-				log.Printf("received headers: %s %s", resp.URL, resp.MimeType)
-				if resp.MimeType != "text/html" {
-					chromedp.Cancel(ctx)
-				}
-
-				if strings.Contains(resp.URL, "youtube.com") {
-					log.Printf("YT!!")
-				}
-
-				// may be redirected
-				switch ContentType := resp.Headers["Content-Type"].(type) {
-				case string:
-					// here v has type T
-					if !strings.Contains(ContentType, "text/html") {
-						chromedp.Cancel(ctx)
-					}
-				}
-
-				switch ContentType := resp.Headers["content-type"].(type) {
-				case string:
-					// here v has type T
-					if !strings.Contains(ContentType, "text/html") {
-						chromedp.Cancel(ctx)
-					}
-				}
-			}
-		}
-	})
-
-	req := `
-(async () => new Promise((resolve, reject) => {
-	var handle = NaN;
-
-	(function animate() {
-		if (!isNaN(handle)) {
-			clearTimeout(handle);
-		}
-
-		if (document.title.length > 0 && !document.title.startsWith("http")) {
-			resolve(document.title);
-		} else {
-			handle = setTimeout(animate, 1000);
-		}
-	}());
-}));
-`
-	err := chromedp.Run(ctx,
-		chromedp.Navigate(urlstr),
-		//chromedp.Evaluate(`window.location.href`, &res),
-		chromedp.Evaluate(req, nil, func(p *runtime.EvaluateParams) *runtime.EvaluateParams {
-			return p.WithAwaitPromise(true)
-		}),
-		chromedp.Title(&title),
-	)
-	if err == context.Canceled {
-		// url as title
-		log.Printf("Cancel!!")
-		return urlstr, nil
+func insertStringToFile(filename string, offset int, content string) error {
+	// Read the entire file content
+	originalContent, err := ioutil.ReadFile(filename)
+	if err != nil {
+		return fmt.Errorf("failed to read file: %w", err)
 	}
 
-	return title, err
+	// Calculate the new content size
+	newContentSize := len(originalContent) + len(content)
+
+	// Create a new byte slice to hold the modified content
+	newContent := make([]byte, newContentSize)
+
+	// Copy the part before the offset
+	copy(newContent[:offset], originalContent[:offset])
+
+	// Copy the string to be inserted
+	copy(newContent[offset:offset+len(content)], []byte(content))
+
+	// Copy the part after the offset
+	copy(newContent[offset+len(content):], originalContent[offset:])
+
+	// Write the new content back to the file, truncating the original
+	err = ioutil.WriteFile(filename, newContent, 0644)
+	if err != nil {
+		return fmt.Errorf("failed to write file: %w", err)
+	}
+
+	return nil
 }
 
-// fmt.Println(getFolderName(`P`))           //P
-// fmt.Println(getFolderName(`P:`))          //P
-// fmt.Println(getFolderName(`P:\`))         //P
-// fmt.Println(getFolderName(`P:\testing`))  //testing
-// fmt.Println(getFolderName(`P:\testing\`)) //testing
-func getFolderName(input string) string {
-	var folderName string
-	lastIndex := strings.LastIndex(input, `\`)
-	length := len(input)
-	if lastIndex+1 == length {
-		lastIndex = strings.LastIndex(input[0:length-1], `\`)
-		folderName = input[lastIndex+1 : length-1]
-	} else {
-		folderName = input[lastIndex+1 : length]
-	}
-
-	if folderName[len(folderName)-1:] == ":" {
-		return folderName[0 : len(folderName)-1]
-	} else {
-		return folderName
-	}
+func main() {
+	writeAFile()
+	readTheFile()
+	insertStringToFile("output.txt", 8, "->new<-")
+	readTheFile()
 }
