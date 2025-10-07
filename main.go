@@ -5,6 +5,7 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
+	"sort"
 )
 
 func ls() {
@@ -45,27 +46,43 @@ func readTheFile() {
 	fmt.Println(contentString)
 }
 
-func insertStringToFile(filename string, offset int, content string) error {
+func insertStringsToFile(filename string, insertions map[int]string) error {
 	// Read the entire file content
 	originalContent, err := ioutil.ReadFile(filename)
 	if err != nil {
 		return fmt.Errorf("failed to read file: %w", err)
 	}
 
-	// Calculate the new content size
-	newContentSize := len(originalContent) + len(content)
-
 	// Create a new byte slice to hold the modified content
-	newContent := make([]byte, newContentSize)
+	newContent := make([]byte, len(originalContent))
 
-	// Copy the part before the offset
-	copy(newContent[:offset], originalContent[:offset])
+	// Copy original content to new content
+	copy(newContent, originalContent)
 
-	// Copy the string to be inserted
-	copy(newContent[offset:offset+len(content)], []byte(content))
+	// Keep track of total length of inserted strings
+	totalInsertedLength := 0
 
-	// Copy the part after the offset
-	copy(newContent[offset+len(content):], originalContent[offset:])
+	// Sort the insertion map by keys (offsets) to ensure proper order
+	offsets := make([]int, 0, len(insertions))
+	for offset := range insertions {
+		offsets = append(offsets, offset)
+	}
+	sort.Ints(offsets)
+
+	for _, offset := range offsets {
+		content := insertions[offset]
+		insertionOffset := offset + totalInsertedLength
+
+		// Create a new byte slice to hold modified content after each insertion
+		newContentWithInsertions := make([]byte, len(newContent)+len(content))
+		copy(newContentWithInsertions[:insertionOffset], newContent[:insertionOffset])
+		copy(newContentWithInsertions[insertionOffset:], []byte(content))
+		copy(newContentWithInsertions[insertionOffset+len(content):], newContent[insertionOffset:])
+
+		// Update newContent to the newly constructed content
+		newContent = newContentWithInsertions
+		totalInsertedLength += len(content)
+	}
 
 	// Write the new content back to the file, truncating the original
 	err = ioutil.WriteFile(filename, newContent, 0644)
@@ -79,6 +96,16 @@ func insertStringToFile(filename string, offset int, content string) error {
 func main() {
 	writeAFile()
 	readTheFile()
-	insertStringToFile("output.txt", 8, "->new<-")
+
+	insertions := map[int]string{
+		8:  "->new<-",
+		20: "->another<-",
+	}
+
+	err := insertStringsToFile("output.txt", insertions)
+	if err != nil {
+		log.Fatalf("Error inserting strings: %v", err)
+	}
+
 	readTheFile()
 }
